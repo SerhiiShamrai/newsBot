@@ -58,17 +58,29 @@ class NewsChecker:
         """Перевірка, чи вже була опублікована ця новина."""
         return url in self.published
 
-    def fetch_rss_feeds(self) -> List[feedparser.FeedParserDict]:
+    def fetch_rss_feeds(self) -> List[Dict]:
         """Отримання RSS-стрічок з усіх джерел."""
         feeds = []
         for source in RSS_SOURCES:
             try:
                 feed = feedparser.parse(source["url"])
+                
+                # Перевірка на помилки парсингу XML (твоя оригінальна логіка)
                 if feed.bozo and len(feed.bozo_exception) > 0:
-                    print(f"⚠️  Помилка парсингу RSS для {source['name']}: {source['url']}")
+                    print(f"⚠️ Помилка парсингу RSS для {source['name']}: {source['url']}")
                     continue
+                
                 for entry in feed.entries:
-                    feeds.append(entry)
+                    # Створюємо словник, щоб не конфліктувати з об'єктом entry
+                    # і додаємо туди назву джерела
+                    entry_data = {
+                        "title": getattr(entry, 'title', ''),
+                        "description": getattr(entry, 'description', ''),
+                        "link": getattr(entry, 'link', ''),
+                        "source_name": source["name"]  # Назва джерела з config.py
+                    }
+                    feeds.append(entry_data)
+                    
             except Exception as e:
                 print(f"❌ Помилка при читанні RSS {source['name']}: {e}")
         return feeds

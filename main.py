@@ -102,12 +102,15 @@ async def run_news_check():
         print("ℹ️ Релевантних новин не знайдено.")
         return
     
-    # 3. Публікуємо
-    for news in relevant_news:
-        await post_news_to_group(news)
-        news_checker.mark_as_published(news["link"])
-    
-    print(f"✅ Готово! Опубліковано: {len(relevant_news)} новин")
+   # 3. Публікуємо лише одну, найкращу новину
+    if relevant_news:
+        best_news = relevant_news[0]
+        await post_news_to_group(best_news)
+        news_checker.mark_as_published(best_news["link"])
+        # Цей принт набагато корисніший:
+        print(f"✅ Готово! Опубліковано: {best_news['title']}") 
+    else:
+        print("ℹ️ Релевантних новин не знайдено.")
 
 
 @dp.message(Command("check"))
