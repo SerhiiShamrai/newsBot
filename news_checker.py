@@ -2,6 +2,7 @@ import feedparser
 import json
 from typing import List, Dict, Tuple
 from sentence_transformers import SentenceTransformer
+from bs4 import BeautifulSoup
 
 from config import (
     ETALON_SENTENCES,
@@ -27,12 +28,12 @@ class NewsChecker:
         self.published: List[str] = []
         self._load_published()
 
-    def _compute_embeddings(
-        self,
-        texts: List[str]
-    ):
-        """Обчислення embeddings для списку текстів."""
-        return self.model.encode(texts)
+    def _compute_embeddings(self, texts: List[str]):
+        """Обчислення нормалізованих embeddings."""
+        return self.model.encode(
+            texts,
+            normalize_embeddings=True
+        )
 
     def _load_published(self):
         """Завантаження історії опублікованих новин."""
@@ -117,19 +118,7 @@ class NewsChecker:
                             "Без назви"
                         ),
 
-                        "description": (
-                            getattr(
-                                entry,
-                                "description",
-                                ""
-                            )
-                            or
-                            getattr(
-                                entry,
-                                "summary",
-                                ""
-                            )
-                        ),
+                        "description": getattr(entry, 'summary', '') or getattr(entry, 'description', ''),
 
                         "link": getattr(
                             entry,
@@ -157,36 +146,27 @@ class NewsChecker:
 
         return feeds
 
-    def extract_news_text(
-        self,
-        entry: Dict
-    ) -> str:
+    def extract_news_text(self, entry) -> str:
         """Витягування тексту з новини."""
 
-        title = entry.get(
-            "title",
-            ""
+        title = entry.get("title", "")
+        description = entry.get("description", "") or ""
+
+        soup = BeautifulSoup(
+            description,
+            "html.parser"
         )
 
-        description = entry.get(
-            "description",
-            ""
-        ) or ""
-
-        return (
-            f"{title}\n\n"
-            f"{description}"
-        ).strip()
-
-    def compute_news_embedding(
-        self,
-        news_text: str
-    ):
-        """Обчислення embedding для новини."""
-
-        return self.model.encode(
-            news_text
+        description = soup.get_text(
+            " ",
+            strip=True
         )
+
+        return f"{title}\n\n{description}".strip()
+
+    def compute_news_embedding(self, news_text: str) -> List[float]:
+        """Обчислення embeddings для тексту новини."""
+        return self.model.encode(news_text)
 
     def compute_cosine_similarity(
         self,

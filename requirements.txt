@@ -11,3 +11,6 @@ sentence-transformers>=2.2.1
 
 # Робота з JSON
 python-dotenv>=1.0.0
+
+# Очищення HTML з RSS-стрічок
+beautifulsoup4
