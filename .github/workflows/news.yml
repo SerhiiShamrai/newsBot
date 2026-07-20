@@ -1,20 +1,18 @@
-# GitHub Actions workflow для перевірки новин
-# Запуск двічі на день: 6:00 та 18:00 за Києвом (UTC+3)
-# Це відповідає 3:00 та 15:00 UTC
-
 name: News Checker
 
 on:
   schedule:
     # 6:00 Києва = 3:00 UTC
     - cron: "0 3 * * *"
-    # 18:00 Києви = 15:00 UTC
+    # 18:00 Києва = 15:00 UTC
     - cron: "0 15 * * *"
   workflow_dispatch:  # Дозволяє вручну запустити перевірку
 
 jobs:
   check-news:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # ДОДАНО: без цього бот не зможе зробити git push для published.json
     
     steps:
       # Крок 1: Завантаження репозиторію
@@ -26,22 +24,22 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      
+          
       # Крок 3: Встановлення залежностей (включаючи sentence-transformers)
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
           echo "✅ Залежності встановлено"
-      
+          
       # Крок 4: Запуск перевірки новин
       - name: Run news checker
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_GROUP_ID: ${{ secrets.TELEGRAM_GROUP_ID }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }} # ВИПРАВЛЕНО: тепер співпадає з кодом
         run: |
           python main.py
           echo "✅ Перевірка новин завершена"
-      
+          
       # Крок 5: Commit та push змін published.json (якщо вони були)
       - name: Commit and push changes
         run: |
