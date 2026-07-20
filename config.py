@@ -58,5 +58,7 @@ TELEGRAM_CHAT_ID = ""    # Встановити через GitHub Secret: TELEGR
 # =============================================================================
 # НАЛАШТУВАННЯ СИСТЕМИ
 # =============================================================================
+MAX_NEWS_PER_RUN = 10
+
 MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 PUBLISHED_FILE = "published.json"

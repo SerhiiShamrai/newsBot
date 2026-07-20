@@ -13,10 +13,10 @@ from news_checker import NewsChecker
 
 # Отримання токену та ID групи з середовища
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GROUP_ID = os.getenv("TELEGRAM_GROUP_ID")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-if not BOT_TOKEN or not GROUP_ID:
-    print("❌ Помилка: відсутні TELEGRAM_BOT_TOKEN або TELEGRAM_GROUP_ID у середовищі!")
+if not BOT_TOKEN or not CHAT_ID:
+    print("❌ Помилка: відсутні TELEGRAM_BOT_TOKEN або TELEGRAM_CHAT_ID у середовищі!")
     sys.exit(1)
 
 
@@ -77,7 +77,7 @@ async def post_news_to_group(news: dict):
     ])
     
     await bot.send_message(
-        chat_id=GROUP_ID,
+        chat_id=CHAT_ID,
         text=news_checker.get_formatted_post(news),
         reply_markup=keyboard,
         parse_mode="HTML"
@@ -95,6 +95,7 @@ async def run_news_check():
     
     for news in relevant_news:
         await post_news_to_group(news)
+        news_checker.mark_as_published(news["link"])
     
     stats = news_checker.get_stats()
     print(f"✅ Перевірка завершена! Опубліковано: {len(relevant_news)} новин")
@@ -120,6 +121,7 @@ async def cmd_check(message: types.Message):
     # Відправка новин в групу
     for news in relevant_news:
         await post_news_to_group(news)
+        news_checker.mark_as_published(news["link"])
     
     # Статистика після перевірки
     stats = news_checker.get_stats()
@@ -136,8 +138,7 @@ async def cmd_check(message: types.Message):
 if __name__ == "__main__":
     print("🚀 Запуск Telegram-бота...")
     print(f"🤖 Токен бота: {BOT_TOKEN[:20]}...")
-    print(f"👥 ID групи: {GROUP_ID}")
+    print(f"👥 ID групи: {CHAT_ID}")
     
-    # Виконуємо перевірку новин, потім запускаємо бота
+    # Виконуємо перевірку новин
     asyncio.run(run_news_check())
-    dp.start_polling(bot)

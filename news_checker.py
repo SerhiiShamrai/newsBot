@@ -31,7 +31,7 @@ class NewsChecker:
 
     def _compute_embeddings(self, texts: List[str]) -> List[float]:
         """Обчислення embeddings для списку текстів."""
-        return self.model.encode(texts, convert_tokens=True)
+        return self.model.encode(texts)
 
     def _load_published(self):
         """Завантаження історії опублікованих новин з published.json."""
@@ -90,7 +90,7 @@ class NewsChecker:
 
     def compute_news_embedding(self, news_text: str) -> List[float]:
         """Обчислення embeddings для тексту новини."""
-        return self.model.encode(news_text, convert_tokens=True)
+        return self.model.encode(news_text)
 
     def compute_cosine_similarity(self, emb1: List[float], emb2: List[float]) -> float:
         """Обчислення косинусної схожості між двома embeddings."""
