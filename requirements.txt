@@ -1,0 +1,13 @@
+# Залежності для Telegram-бота моніторингу новин
+
+# AI-бот для Telegram
+aiogram>=3.10.0
+
+# Читання RSS-стрічок
+feedparser>=6.0.11
+
+# Семантичний пошук (моделі sentence-transformers)
+sentence-transformers>=2.2.1
+
+# Робота з JSON
+python-dotenv>=1.0.0
