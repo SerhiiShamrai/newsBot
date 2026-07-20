@@ -59,30 +59,35 @@ class NewsChecker:
         return url in self.published
 
     def fetch_rss_feeds(self) -> List[Dict]:
-        """Отримання RSS-стрічок з усіх джерел."""
+        """Отримання RSS-стрічок з усіх джерел з надійною обробкою."""
         feeds = []
+        # Додаємо User-Agent, щоб сайти думали, що це звичайний браузер
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        
         for source in RSS_SOURCES:
             try:
-                feed = feedparser.parse(source["url"])
+                # Парсимо з заголовками
+                feed = feedparser.parse(source["url"], request_headers=headers)
                 
-                # Перевірка на помилки парсингу XML (твоя оригінальна логіка)
-                if feed.bozo and len(feed.bozo_exception) > 0:
-                    print(f"⚠️ Помилка парсингу RSS для {source['name']}: {source['url']}")
+                # Перевіряємо, чи є взагалі записи, щоб уникнути помилок
+                if not hasattr(feed, 'entries') or not feed.entries:
+                    print(f"⚠️ Джерело {source['name']} не повернуло новин.")
                     continue
                 
                 for entry in feed.entries:
-                    # Створюємо словник, щоб не конфліктувати з об'єктом entry
-                    # і додаємо туди назву джерела
+                    # Використовуємо getattr з безпечними дефолтними значеннями
                     entry_data = {
-                        "title": getattr(entry, 'title', ''),
-                        "description": getattr(entry, 'description', ''),
-                        "link": getattr(entry, 'link', ''),
-                        "source_name": source["name"]  # Назва джерела з config.py
+                        "title": getattr(entry, 'title', 'Без назви'),
+                        "description": getattr(entry, 'description', '') or getattr(entry, 'summary', ''),
+                        "link": getattr(entry, 'link', 'немає посилання'),
+                        "source_name": source["name"]
                     }
                     feeds.append(entry_data)
                     
             except Exception as e:
-                print(f"❌ Помилка при читанні RSS {source['name']}: {e}")
+                # Виводимо тип помилки замість спроби обчислити її довжину
+                print(f"❌ Помилка при читанні RSS {source['name']}: {type(e).__name__}")
+        
         return feeds
 
     def extract_news_text(self, entry) -> str:
