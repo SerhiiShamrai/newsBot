@@ -30,10 +30,7 @@ class NewsChecker:
 
     def _compute_embeddings(self, texts: List[str]):
         """Обчислення нормалізованих embeddings."""
-        return self.model.encode(
-            texts,
-            normalize_embeddings=True
-        )
+        return self.model.encode(texts, normalize_embeddings=True)
 
     def _load_published(self):
         """Завантаження історії опублікованих новин."""
@@ -166,7 +163,8 @@ class NewsChecker:
 
     def compute_news_embedding(self, news_text: str) -> List[float]:
         """Обчислення embeddings для тексту новини."""
-        return self.model.encode(news_text)
+        return self.model.encode(news_text,normalize_embeddings=True)
+				
 
     def compute_cosine_similarity(
         self,
@@ -234,11 +232,7 @@ class NewsChecker:
 
                 break
 
-            news_text = (
-                self.extract_news_text(
-                    entry
-                )
-            )
+            news_text = entry.get("title", "")
 
             if not news_text.strip():
 
@@ -331,19 +325,6 @@ class NewsChecker:
 
         title = news["title"]
 
-        description = news[
-            "description"
-        ]
-
-        if len(
-            description
-        ) > 300:
-
-            description = (
-                description[:300]
-                + "..."
-            )
-
         link = news["link"]
 
         source = news["source"]
@@ -351,7 +332,6 @@ class NewsChecker:
         post_text = (
             f"📰 {source}\n\n"
             f"{title}\n\n"
-            f"{description}\n\n"
             f"🔗 {link}"
         )
 
