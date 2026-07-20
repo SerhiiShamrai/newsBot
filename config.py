@@ -37,7 +37,7 @@ RSS_SOURCES = [
     },
     {
         "name": "BBC Ukrainian",
-        "url": "https://www.bbc.com/ukrainian/rss"
+        "url": "https://feeds.bbci.co.uk/ukrainian/rss.xml" # Використовуй цей прямий RSS-шлях
     },
     {
         "name": "Reuters World News",
@@ -47,6 +47,27 @@ RSS_SOURCES = [
         "name": "Суспільне Новини",
         "url": "https://suspilne.media/feed/news/"
     },
+    # Додані джерела:
+    {
+        "name": "Укрінформ",
+        "url": "https://www.ukrinform.ua/rss"
+    },
+    {
+        "name": "Радіо Свобода",
+        "url": "https://www.radiosvoboda.org/api/z$qyimtpviq"
+    },
+    {
+        "name": "Інтерфакс-Україна",
+        "url": "https://ua.interfax.com.ua/rss.xml"
+    },
+    {
+        "name": "Deutsche Welle (Українська)",
+        "url": "https://rss.dw.com/xml/rss-uk-all"
+    },
+    {
+        "name": "Forbes Україна",
+        "url": "https://forbes.ua/rss/all.xml"
+    }
 ]
 
 # =============================================================================
