@@ -32,42 +32,38 @@ SIMILARITY_THRESHOLD = 0.8
 # =============================================================================
 RSS_SOURCES = [
     {
+        "name": "Google News UA",
+        "url": "https://news.google.com/rss?hl=uk&gl=UA&ceid=UA:uk"
+    },
+    {
         "name": "Українська правда",
-        "url": "https://www.pravda.com.ua/rss/"
+        "url": "https://www.pravda.com.ua/rss/view_news/"
     },
     {
         "name": "BBC Ukrainian",
-        "url": "https://feeds.bbci.co.uk/ukrainian/rss.xml" # Використовуй цей прямий RSS-шлях
+        "url": "https://feeds.bbci.co.uk/ukrainian/rss.xml"
     },
     {
-        "name": "Reuters World News",
-        "url": "https://www.reuters.com/world/europe/rss/"
+        "name": "LIGA.net",
+        "url": "https://news.liga.net/ua/all/rss.xml"
     },
     {
-        "name": "Суспільне Новини",
-        "url": "https://suspilne.media/feed/news/"
-    },
-    # Додані джерела:
-    {
-        "name": "Укрінформ",
-        "url": "https://www.ukrinform.ua/rss"
+        "name": "NV",
+        "url": "https://nv.ua/rss/all.xml"
     },
     {
         "name": "Радіо Свобода",
-        "url": "https://www.radiosvoboda.org/api/z$qyimtpviq"
+        "url": "https://www.radiosvoboda.org/api/zrqitl-vomx-tpeoumq"
     },
     {
-        "name": "Інтерфакс-Україна",
-        "url": "https://ua.interfax.com.ua/rss.xml"
+        "name": "LB.ua",
+        "url": "https://lb.ua/rss/ukr/rss.xml"
     },
     {
-        "name": "Deutsche Welle (Українська)",
-        "url": "https://rss.dw.com/xml/rss-uk-all"
-    },
-    {
-        "name": "Forbes Україна",
-        "url": "https://forbes.ua/rss/all.xml"
+        "name": "Факти",
+        "url": "https://fakty.ua/rss_feed/ukraine"
     }
+
 ]
 
 # =============================================================================
