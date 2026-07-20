@@ -79,9 +79,10 @@ async def post_news_to_group(news: dict):
     await bot.send_message(
         chat_id=CHAT_ID,
         text=news_checker.get_formatted_post(news),
-        reply_markup=keyboard,
-        parse_mode="HTML"
+        reply_markup=keyboard
     )
+    
+		
 
 
 async def run_news_check():
