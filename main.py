@@ -85,20 +85,29 @@ async def post_news_to_group(news: dict):
 
 
 async def run_news_check():
-    """Асинхронна функція для перевірки новин (використовується в GitHub Actions)."""
+    """Асинхронна функція для перевірки новин."""
+    # 1. Отримуємо новини
     feeds = news_checker.fetch_rss_feeds()
+    
+    # ПЕРЕВІРКА: якщо feeds порожній, не йдемо далі
+    if not feeds:
+        print("⚠️ Новин з RSS не отримано. Зупинка.")
+        return
+        
+    # 2. Фільтруємо
     relevant_news = news_checker.filter_news(feeds)
     
+    # ПЕРЕВІРКА: якщо релевантних немає, зупиняємось
     if not relevant_news:
         print("ℹ️ Релевантних новин не знайдено.")
         return
     
+    # 3. Публікуємо
     for news in relevant_news:
         await post_news_to_group(news)
         news_checker.mark_as_published(news["link"])
     
-    stats = news_checker.get_stats()
-    print(f"✅ Перевірка завершена! Опубліковано: {len(relevant_news)} новин")
+    print(f"✅ Готово! Опубліковано: {len(relevant_news)} новин")
 
 
 @dp.message(Command("check"))

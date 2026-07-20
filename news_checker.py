@@ -113,7 +113,7 @@ class NewsChecker:
         return max_similarity, best_index
 
     def filter_news(self, feeds: List[feedparser.FeedParserDict]) -> List[Dict]:
-        """Фільтрація новин за семантичною схожістю."""
+        """Фільтрація новин за семантичною схожістю (безпечна версія)."""
         relevant_news = []
         
         for entry in feeds:
@@ -140,11 +140,19 @@ class NewsChecker:
                 if self.is_already_published(url):
                     continue
                 
+                # --- ОСЬ ТУТ БУЛА ПОМИЛКА, ВИПРАВЛЯЄМО ---
+                # Перевіряємо, чи існує індекс в списку RSS_SOURCES
+                if 0 <= best_index < len(RSS_SOURCES):
+                    source_name = RSS_SOURCES[best_index]["name"]
+                else:
+                    source_name = "Невідоме джерело"
+                # ----------------------------------------
+                
                 relevant_news.append({
                     "title": getattr(entry, 'title', ''),
                     "description": news_text,
                     "link": url,
-                    "source": RSS_SOURCES[best_index]["name"] if best_index >= 0 else "Невідоме джерело",
+                    "source": source_name,
                     "similarity": max_similarity,
                 })
         
