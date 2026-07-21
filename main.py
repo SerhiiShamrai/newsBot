@@ -116,10 +116,10 @@ async def run_news_check():
     
     # 3. Публікуємо лише одну, найкращу новину
     if relevant_news:
-        best_news = relevant_news[0]
-        await post_news_to_group(best_news)
-        news_checker.mark_as_published(best_news["link"])
-        print(f"✅ Готово! Опубліковано: {best_news['title']}") 
+         best_news = max(relevant_news, key=lambda x: x["similarity"])
+         await post_news_to_group(best_news)
+         news_checker.mark_as_published(best_news["link"])
+         print(f"✅ Готово! Опубліковано: {best_news['title']}") 
     else:
         print("ℹ️ Релевантних новин не знайдено.")
 
