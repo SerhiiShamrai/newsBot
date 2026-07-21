@@ -90,6 +90,10 @@ RSS_SOURCES = [
     {
         "name": "Факти",
         "url": "https://fakty.ua/rss_feed/ukraine"
+    },
+	{
+        "name": "Bloomberg Politics",
+        "url": "https://feeds.bloomberg.com/politics/news.rss"
     }
 
 ]
