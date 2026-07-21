@@ -65,26 +65,30 @@ def post_to_telegram(summary: str, url: str, report_date: date) -> bool:
         f"🔗 Оригінал: {url}"
     )
 
+    bot = Bot(token=TELEGRAM_BOT_TOKEN)
+    
+    import asyncio
+    
+    async def send_message():
+        await bot.send_message(
+            chat_id=int(TELEGRAM_CHAT_ID),
+            text=post_text,
+            parse_mode="HTML"
+        )
+    
+    async def close_session():
+        await bot.session.close()
+    
     try:
-        bot = Bot(token=TELEGRAM_BOT_TOKEN)
         dp = Dispatcher()
-
-        import asyncio
-
-        async def send_message():
-            await bot.send_message(
-                chat_id=int(TELEGRAM_CHAT_ID),
-                text=post_text,
-                parse_mode="HTML"
-            )
-
         asyncio.run(send_message())
         print(f"✅ Звіт ISW за {formatted_date} опубліковано")
         return True
-
     except Exception as e:
         print(f"❌ Помилка при публікації в Telegram: {e}")
         return False
+    finally:
+        asyncio.run(close_session())
 
 
 def main():
