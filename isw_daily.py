@@ -77,7 +77,7 @@ async def post_to_telegram(summary: str, url: str, report_date: date) -> bool:
         print(f"❌ Помилка при публікації в Telegram: {e}")
         return False
     finally:
-        await bot.session.close
+        await bot.session.close()
 
 
 async def main():
