@@ -35,7 +35,7 @@ def format_date_ukrainian(target_date: date) -> str:
     return f"{day} {month} {year}"
 
 
-def post_to_telegram(summary: str, url: str, report_date: date) -> bool:
+async def post_to_telegram(summary: str, url: str, report_date: date) -> bool:
     """
     Публікує переклад звіту ISW у Telegram-групу.
 
@@ -47,8 +47,7 @@ def post_to_telegram(summary: str, url: str, report_date: date) -> bool:
     Returns:
         True якщо успішно опубліковано, False в іншому разі
     """
-    from aiogram import Bot, Dispatcher
-    from aiogram.types import Message
+    from aiogram import Bot
 
     TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
     TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -66,32 +65,22 @@ def post_to_telegram(summary: str, url: str, report_date: date) -> bool:
     )
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
-    
-    import asyncio
-    
-    async def send_message():
+    try:
         await bot.send_message(
             chat_id=int(TELEGRAM_CHAT_ID),
             text=post_text,
             parse_mode="HTML"
         )
-    
-    async def close_session():
-        await bot.session.close()
-    
-    try:
-        dp = Dispatcher()
-        asyncio.run(send_message())
         print(f"✅ Звіт ISW за {formatted_date} опубліковано")
         return True
     except Exception as e:
         print(f"❌ Помилка при публікації в Telegram: {e}")
         return False
     finally:
-        asyncio.run(close_session())
+        await bot.session.close
 
 
-def main():
+async def main():
     """Основна функція для щоденного запуску."""
     today = date.today()
     yesterday = today - timedelta(days=1)
@@ -115,11 +104,12 @@ def main():
     if not summary or "не вдалося перекласти" in summary:
         print("⚠️ Переклад не вдався, публікуємо fallback")
 
-    success = post_to_telegram(summary, url, yesterday)
+    success = await post_to_telegram(summary, url, yesterday)
 
     if not success:
         print("⚠️ Не вдалося опублікувати у Telegram")
 
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
