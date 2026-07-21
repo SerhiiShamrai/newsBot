@@ -1,0 +1,59 @@
+name: Quote of the Day
+
+on:
+  schedule:
+    # 14:00 Києва (літній час, UTC+3) = 11:00 UTC
+    - cron: "0 11 * * *"
+  workflow_dispatch:  # Дозволяє вручну запустити публікацію
+
+jobs:
+  publish-quote:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # ДОДАНО: без цього бот не зможе зробити git push для quotes_state.json
+    
+    steps:
+      # Крок 1: Завантаження репозиторію
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      # Крок 2: Встановлення Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          
+      # Крок 3: Встановлення залежностей (включаючи aiogram)
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          echo "✅ Залежності встановлено"
+          
+      # Крок 4: Запуск публікації цитати
+      - name: Run quote publisher
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python quote_daily.py
+          echo "✅ Публікація цитати завершена"
+          
+      # Крок 5: Commit та push змін quotes_state.json (якщо вони були)
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Перевірка, чи є зміни в quotes_state.json
+          if [ -f quotes_state.json ]; then
+            if git diff --quiet quotes_state.json; then
+              echo "ℹ️ quotes_state.json не змінився або ще не існує."
+            else
+              git add quotes_state.json
+              git commit -m "Update: quote of the day state" -a || echo "No changes to commit"
+              git push
+              echo "✅ Стан цитати оновлено в репозиторії"
+            fi
+          else
+            echo "ℹ️ Файл quotes_state.json ще не існує."
+          fi
