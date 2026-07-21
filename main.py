@@ -9,6 +9,7 @@ from aiogram.filters.command import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from news_checker import NewsChecker
+from summarizer import generate_summary
 
 
 # Отримання токену та ID групи з середовища
@@ -76,9 +77,19 @@ async def post_news_to_group(news: dict):
         [InlineKeyboardButton(text="🔗 Відкрити", url=news["link"])]
     ])
     
+    # Генерація власного заголовка та переказу
+    summary_result = generate_summary(news["title"], news.get("description", ""))
+    
+    post_text = (
+        f"📰 {news['source']}\n\n"
+        f"{summary_result['title']}\n\n"
+        f"{summary_result['summary']}\n\n"
+        f"🔗 {news['link']}"
+    )
+    
     await bot.send_message(
         chat_id=CHAT_ID,
-        text=news_checker.get_formatted_post(news),
+        text=post_text,
         reply_markup=keyboard
     )
     
@@ -92,23 +103,22 @@ async def run_news_check():
     
     # ПЕРЕВІРКА: якщо feeds порожній, не йдемо далі
     if not feeds:
-        print("⚠️ Новин з RSS не отримано. Зупинка.")
+        print("⚠️ Новин з RSS не отримано. Зупина.")
         return
         
     # 2. Фільтруємо
     relevant_news = news_checker.filter_news(feeds)
     
-    # ПЕРЕВІРКА: якщо релевантних немає, зупиняємось
+    # ПЕРЕВІРКА: якщо релевантних немає, зупинаємось
     if not relevant_news:
         print("ℹ️ Релевантних новин не знайдено.")
         return
     
-   # 3. Публікуємо лише одну, найкращу новину
+    # 3. Публікуємо лише одну, найкращу новину
     if relevant_news:
         best_news = relevant_news[0]
         await post_news_to_group(best_news)
         news_checker.mark_as_published(best_news["link"])
-        # Цей принт набагато корисніший:
         print(f"✅ Готово! Опубліковано: {best_news['title']}") 
     else:
         print("ℹ️ Релевантних новин не знайдено.")

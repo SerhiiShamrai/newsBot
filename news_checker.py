@@ -232,7 +232,7 @@ class NewsChecker:
 
                 break
 
-            news_text = entry.get("title", "")
+            news_text = self.extract_news_text(entry)
 
             if not news_text.strip():
 

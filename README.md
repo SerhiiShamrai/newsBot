@@ -60,6 +60,17 @@ pip install -r requirements.txt
 |-------------|------------------|
 | `TELEGRAM_BOT_TOKEN` | `123456789:ABCdefGHIjklMNOpqrsTUVwxyz` |
 | `TELEGRAM_CHAT_ID` | `-100123456789` |
+| `GROQ_API_KEY` | `gsk_...` (ключ від Groq) |
+
+#### Ключ Groq API
+
+Щоб отримати ключ для AI-сумаризації новин:
+
+1. Зайдіть на [https://console.groq.com](https://console.groq.com)
+2. Створіть акаунт або увійдіть
+3. Перейдіть у **API Keys** → **Create API Key**
+4. Скопіюйте ключ (починається з `gsk_`)
+5. Додайте його як секрет `GROQ_API_KEY` у GitHub
 
 ### 5. Перший запуск (завантаження моделі)
 
