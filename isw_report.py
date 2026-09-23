@@ -5,9 +5,16 @@
 import os
 from datetime import date, datetime
 from typing import Optional
+
 import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
+
+# Модель Groq для перекладу/переказу.
+# llama-3.3-70b-versatile деактивована Groq 16.08.2026 — саме через це
+# бот падав у fallback "(не вдалося перекласти)".
+# Можна перевизначити змінною середовища GROQ_MODEL, не змінюючи код.
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 
 
 def build_isw_url(target_date: date) -> str:
@@ -25,12 +32,11 @@ def build_isw_url(target_date: date) -> str:
     Приклад:
         >>> build_isw_url(date(2026, 7, 21))
         'https://understandingwar.org/research/russia-ukraine/
-         russian-offensive-campaign-assessment-july-21-2026/'
+        russian-offensive-campaign-assessment-july-21-2026/'
     """
     month_name = target_date.strftime("%B").lower()
     day = target_date.day
     year = target_date.year
-
     return (
         f"https://understandingwar.org/research/russia-ukraine/"
         f"russian-offensive-campaign-assessment-{month_name}-{day}-{year}/"
@@ -54,32 +60,26 @@ def fetch_isw_report(url: str) -> Optional[str]:
             "Chrome/124.0.0.0 Safari/537.36"
         )
     }
-
     try:
         response = requests.get(url, headers=headers, timeout=30)
-
         if response.status_code != 200:
             print(f"⚠️ Звіт не знайдено (статус {response.status_code}): {url}")
             return None
 
         soup = BeautifulSoup(response.text, "html.parser")
-
         article_content = soup.find("article")
         if not article_content:
             article_content = soup.find("div", class_=["entry-content", "post-content"])
-
         if not article_content:
             main = soup.find("main")
             if main:
                 article_content = main
-
         if not article_content:
             print(f"⚠️ Не вдалося знайти контент статті: {url}")
             return None
 
         text_elements = article_content.find_all(["p", "h2", "h3", "h4"])
         lines = []
-
         for elem in text_elements:
             text = elem.get_text(" ", strip=True)
             if text:
@@ -114,7 +114,7 @@ def translate_and_summarize_isw(text: str) -> dict:
 
     # Вивід перших 500 символів у лог для перевірки контенту перед відправкою в Groq
     print(f"📄 Перші 500 символів тексту для ISW: {truncated_text[:500]}")
-    
+
     prompt = (
         "Ось звіт англійською мовою про останні події війни Росії проти України. "
         "Зроби детальний переказ українською мовою, приблизно 20 речень, "
@@ -128,19 +128,24 @@ def translate_and_summarize_isw(text: str) -> dict:
 
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=GROQ_MODEL,
             messages=[
                 {"role": "user", "content": prompt}
             ],
             temperature=0.5,
             max_tokens=4000
         )
-
         summary = response.choices[0].message.content.strip()
         return {"summary": summary}
 
     except Exception as e:
-        print(f"⚠️ Помилка при перекладі ISW звіту: {e}")
+        # Лог тепер показує назву моделі й тип помилки — це прискорить
+        # діагностику наступного разу (модель знову деактивують,
+        # ключ протермінується, ліміт вичерпається тощо).
+        print(
+            f"⚠️ Помилка при перекладі ISW звіту (модель {GROQ_MODEL}): "
+            f"{type(e).__name__}: {e}"
+        )
         fallback_text = text[:1000] if len(text) > 1000 else text
         return {
             "summary": f"(не вдалося перекласти)\n\n{fallback_text}"
