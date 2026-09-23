@@ -5,6 +5,7 @@
 звіту ISW за вчора у Telegram-групу.
 """
 
+import html
 import os
 from datetime import date, timedelta
 import sys
@@ -58,9 +59,13 @@ async def post_to_telegram(summary: str, url: str, report_date: date) -> bool:
 
     formatted_date = format_date_ukrainian(report_date)
 
+    # Екрануємо спецсимволи HTML (<, >, &), бо переклад — довільний текст
+    # від моделі, а parse_mode="HTML" зламається на будь-якому "<" чи "&".
+    escaped_summary = html.escape(summary)
+
     post_text = (
         f"🎖️ Аналіз ISW за {formatted_date}:\n\n"
-        f"{summary}\n\n"
+        f"<blockquote expandable>{escaped_summary}</blockquote>\n\n"
         f"🔗 Оригінал: {url}"
     )
 
