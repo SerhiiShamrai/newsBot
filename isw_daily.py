@@ -36,6 +36,51 @@ def format_date_ukrainian(target_date: date) -> str:
     return f"{day} {month} {year}"
 
 
+def _truncate_at_sentence_boundary(text: str, max_length: int) -> str:
+    """
+    Обрізає текст до max_length символів, але не посеред речення чи слова:
+    шукає останню крапку/знак оклику/питання перед лімітом і ріже там.
+
+    Якщо в межах ліміту не знайшлося жодного завершеного речення (текст
+    складається з одного дуже довгого речення), ріже по останньому пробілу,
+    щоб хоча б не розривати слово навпіл.
+
+    Args:
+        text: Вхідний текст
+        max_length: Максимальна довжина результату (без урахування "…")
+
+    Returns:
+        Текст, обрізаний за реченням/словом, з "…" в кінці якщо обрізали;
+        оригінальний текст без змін, якщо він і так вкладався в ліміт.
+    """
+    if len(text) <= max_length:
+        return text
+
+    # Лишаємо трохи місця під "…"
+    budget = max(max_length - 1, 0)
+    candidate = text[:budget]
+
+    sentence_end = max(
+        candidate.rfind(". "),
+        candidate.rfind("! "),
+        candidate.rfind("? "),
+        candidate.rfind(".\n"),
+        candidate.rfind("!\n"),
+        candidate.rfind("?\n"),
+    )
+
+    if sentence_end != -1:
+        return candidate[: sentence_end + 1].rstrip() + "…"
+
+    # Немає завершеного речення в межах ліміту — ріжемо по останньому пробілу
+    space_pos = candidate.rfind(" ")
+    if space_pos != -1:
+        return candidate[:space_pos].rstrip() + "…"
+
+    # Взагалі без пробілів (малоймовірно) — ріжемо як є
+    return candidate.rstrip() + "…"
+
+
 async def post_to_telegram(summary: str, url: str, report_date: date) -> bool:
     """
     Публікує переклад звіту ISW у Telegram-групу.
@@ -59,15 +104,29 @@ async def post_to_telegram(summary: str, url: str, report_date: date) -> bool:
 
     formatted_date = format_date_ukrainian(report_date)
 
-    # Екрануємо спецсимволи HTML (<, >, &), бо переклад — довільний текст
-    # від моделі, а parse_mode="HTML" зламається на будь-якому "<" чи "&".
-    escaped_summary = html.escape(summary)
+    # Telegram обмежує повідомлення 4096 символами (лічиться разом зі
+    # схованою частиною <blockquote expandable>, а не лише видимою).
+    # Модель просимо писати коротко (див. isw_report.py), але не покладаємось
+    # тільки на це — тут гарантована підстраховка, якщо звіт все ж завеликий.
+    TELEGRAM_MAX_LEN = 4096
 
-    post_text = (
-        f"🎖️ Аналіз ISW за {formatted_date}:\n\n"
-        f"<blockquote expandable>{escaped_summary}</blockquote>\n\n"
-        f"🔗 Оригінал: {url}"
-    )
+    header = f"🎖️ Аналіз ISW за {formatted_date}:\n\n"
+    footer = f"\n\n🔗 Оригінал: {url}"
+    wrapper_overhead = len("<blockquote expandable></blockquote>")
+
+    available_for_summary = TELEGRAM_MAX_LEN - len(header) - len(footer) - wrapper_overhead
+
+    raw_summary = _truncate_at_sentence_boundary(summary, available_for_summary)
+    escaped_summary = html.escape(raw_summary)
+
+    post_text = f"{header}<blockquote expandable>{escaped_summary}</blockquote>{footer}"
+
+    # Остання підстраховка: якщо після escape() (яке подовжує текст через
+    # &, < або >) все одно вилізли за межі — ріжемо ще раз, вже жорстко.
+    if len(post_text) > TELEGRAM_MAX_LEN:
+        overflow = len(post_text) - TELEGRAM_MAX_LEN
+        escaped_summary = escaped_summary[:-(overflow + 1)].rstrip() + "…"
+        post_text = f"{header}<blockquote expandable>{escaped_summary}</blockquote>{footer}"
 
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     try:
