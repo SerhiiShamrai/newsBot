@@ -77,15 +77,33 @@ async def post_news_to_group(news: dict):
         [InlineKeyboardButton(text="🔗 Відкрити", url=news["link"])]
     ])
     
-    # Генерація власного заголовка та переказу
-    summary_result = generate_summary(news["title"], news.get("description", ""))
+    # Генерація власного заголовка та переказу.
+    # news["description"] — це вже ТІЛЬКО тіло новини без заголовка
+    # (дублікати "опис == заголовок" прибираються на етапі фільтрації).
+    title = news["title"]
+    description = (news.get("description") or "").strip()
+    summary_result = generate_summary(title, description)
     
-    post_text = (
-        f"📰 {news['source']}\n\n"
-        f"{summary_result['title']}\n\n"
-        f"{summary_result['summary']}\n\n"
-        f"🔗 {news['link']}"
-    )
+    result_title = (summary_result.get("title") or title).strip()
+    result_summary = (summary_result.get("summary") or "").strip()
+    
+    # Захист від повторів: якщо LLM повернула переказ, що збігається
+    # із заголовком (або порожній) — не дублюємо той самий текст двічі.
+    def _norm(s: str) -> str:
+        return " ".join(s.split()).lower().rstrip(".!")
+    
+    if not result_summary or _norm(result_summary) == _norm(result_title):
+        result_summary = ""
+    
+    parts = [
+        f"📰 {news['source']}",
+        result_title,
+    ]
+    if result_summary:
+        parts.append(result_summary)
+    parts.append(f"🔗 {news['link']}")
+    
+    post_text = "\n\n".join(parts)
     
     await bot.send_message(
         chat_id=CHAT_ID,
