@@ -1,0 +1,410 @@
+From 0bad9e657bf132408b03b192212a0cf356f1041a Mon Sep 17 00:00:00 2001
+From: "qwen.ai[bot]" <qwenlm-intl@service.alibaba.com>
+Date: Wed, 14 Oct 2026 18:58:17 +0000
+Subject: [PATCH 1/3] Fix: quotes now rotate sequentially without repeats until
+ list ends
+
+- Replace random.choice with strict sequential index rotation (0..N-1, then cycle)
+- Persist state file next to the module (repo root) so it survives runs from any directory
+- Add robust validation of quotes_state.json (bad indices, duplicates, corrupted JSON)
+---
+ quote_of_day.py | 101 +++++++++++++++++++++++++++++++++++++-----------
+ 1 file changed, 79 insertions(+), 22 deletions(-)
+
+diff --git a/quote_of_day.py b/quote_of_day.py
+index 19d3317..dd2520f 100644
+--- a/quote_of_day.py
++++ b/quote_of_day.py
+@@ -1,41 +1,82 @@
+ """
+ Модуль для ротації цитат дня.
+ Зберігає стан показаних цитат у файлі quotes_state.json.
++
++Стан (файл quotes_state.json) обов'язково зберігається та оновлюється
++в межах репозиторію, щоб GitHub Actions міг закомітити його назад
++і наступний запуск продовжив ротацію з правильного місця.
+ """
+ 
+ import json
+-import random
+-from datetime import date, timedelta
++from datetime import date
+ from pathlib import Path
+ 
+ from quotes import QUOTES
+ 
+ 
++# Директорій, де лежить цей модуль (корінь репозиторію).
++_MODULE_DIR = Path(__file__).resolve().parent
++
++
+ STATE_FILE = "quotes_state.json"
+ 
+ 
++def _resolve_state_paths() -> list[Path]:
++    """
++    Шляхи, де може лежати файл стану.
++
++    Спочатку — відносно поточної директорії (зворотна сумісність),
++    потім — поруч із модулем (корінь репозиторію). Другий варіант
++    гарантує, що навіть якщо скрипт запускається з іншої директорії,
++    стан все одно буде записано всередину репозиторію, звідки
++    GitHub Actions зможе його закомітити.
++    """
++    return [Path(STATE_FILE), _MODULE_DIR / STATE_FILE]
++
++
+ def _load_state() -> dict:
+     """Завантажити стан з файлу або створити новий."""
+-    state_path = Path(STATE_FILE)
+-    if state_path.exists():
+-        with open(state_path, "r", encoding="utf-8") as f:
+-            return json.load(f)
++    for state_path in _resolve_state_paths():
++        if state_path.exists():
++            try:
++                with open(state_path, "r", encoding="utf-8") as f:
++                    state = json.load(f)
++                if isinstance(state, dict):
++                    return state
++            except (json.JSONDecodeError, OSError):
++                # Пошкоджений файл стану — починаємо з чистого листа.
++                pass
+     return {"shown_indices": [], "last_shown": None}
+ 
+ 
+ def _save_state(state: dict) -> None:
+-    """Зберегти стан у файл."""
+-    with open(STATE_FILE, "w", encoding="utf-8") as f:
++    """
++    Зберегти стан у файл.
++
++    Файл завжди записується в корінь репозиторію (поруч із модулем),
++    щоб workflow міг зробити commit і push оновленого стану.
++    Якщо поточна директорія відрізняється, робимо копію й там,
++    щоб уникнути розбіжностей між двома можливими місцями зберігання.
++    """
++    repo_path = _MODULE_DIR / STATE_FILE
++    with open(repo_path, "w", encoding="utf-8") as f:
+         json.dump(state, f, ensure_ascii=False, indent=2)
+ 
++    cwd_path = Path(STATE_FILE).resolve()
++    if cwd_path != repo_path.resolve():
++        try:
++            with open(cwd_path, "w", encoding="utf-8") as f:
++                json.dump(state, f, ensure_ascii=False, indent=2)
++        except OSError:
++            pass
++
+ 
+ def get_next_quote() -> str | None:
+     """
+     Отримати наступну цитату для показу.
+     
+-    Якщо всі цитати вже були показані — починає новий цикл.
+-    Випадковим чином обирає індекс з тих, що ще не в shown_indices.
+-    Додає цей індекс до shown_indices і зберігає стан.
++    Цитати йдуть одна за одною без повторень у межах циклу.
++    Коли всі цитати показано — починається новий цикл (з першої).
+     
+     Повертає текст цитати або None, якщо QUOTES порожній.
+     """
+@@ -43,27 +84,43 @@ def get_next_quote() -> str | None:
+         return None
+     
+     state = _load_state()
+-    shown_indices = set(state.get("shown_indices", []))
++    total = len(QUOTES)
++    
++    # Валідуємо збережені індекси: лишаємо лише коректні та унікальні.
++    raw_shown = state.get("shown_indices", [])
++    shown_indices: set[int] = set()
++    if isinstance(raw_shown, list):
++        for idx in raw_shown:
++            if isinstance(idx, int) and 0 <= idx < total:
++                shown_indices.add(idx)
+     
+-    # Якщо всі цитати вже були показані — скидаємо список
+-    if len(shown_indices) >= len(QUOTES):
++    # Якщо всі цитати вже були показані — починаємо новий цикл.
++    if len(shown_indices) >= total:
+         shown_indices = set()
+     
+-    # Отримуємо індекси, які ще не були показані
+-    available_indices = [i for i in range(len(QUOTES)) if i not in shown_indices]
++    available_indices = [i for i in range(total) if i not in shown_indices]
+     
+     if not available_indices:
+-        # На випадок, якщо щось пішло не так — починаємо з нуля
++        # Захист на випадок некоректного стану — починаємо з нуля.
+         shown_indices = set()
+-        available_indices = list(range(len(QUOTES)))
++        available_indices = list(range(total))
+     
+-    # Випадковим чином обираємо індекс
+-    chosen_index = random.choice(available_indices)
++    # Беремо першу доступну цитату за порядком — так цитати гарантовано
++    # слідують одна за одною без повторень до завершення всього списку.
++    chosen_index = available_indices[0]
+     shown_indices.add(chosen_index)
+     
+-    # Оновлюємо стан
+-    state["shown_indices"] = list(shown_indices)
++    # Оновлюємо стан (список показаних + історія останніх показів).
++    history = state.get("history", [])
++    if not isinstance(history, list):
++        history = []
++    history.append({"index": chosen_index, "date": date.today().isoformat()})
++    history = history[-total:]  # тримаємо історію не довшу за один цикл
++    
++    state["shown_indices"] = sorted(shown_indices)
+     state["last_shown"] = date.today().isoformat()
++    state["last_index"] = chosen_index
++    state["history"] = history
+     _save_state(state)
+     
+     return QUOTES[chosen_index]
+\ No newline at end of file
+-- 
+2.39.5
+
+
+From 1e1124e20934af13c3548790cdf2b7d02453b603 Mon Sep 17 00:00:00 2001
+From: "qwen.ai[bot]" <qwenlm-intl@service.alibaba.com>
+Date: Wed, 14 Oct 2026 19:03:13 +0000
+Subject: [PATCH 2/3] Add .gitignore to exclude Python cache files - Create
+ .gitignore with __pycache__/ and *.pyc entries - Ensure quote_of_day.py state
+ persistence logic remains intact for GitHub Actions integration
+
+---
+ .gitignore | 2 ++
+ 1 file changed, 2 insertions(+)
+ create mode 100644 .gitignore
+
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..7a60b85
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,2 @@
++__pycache__/
++*.pyc
+-- 
+2.39.5
+
+
+From e1d01ea8a403908b27c4b9b77e1ccf9dfb13dc0d Mon Sep 17 00:00:00 2001
+From: "qwen.ai[bot]" <qwenlm-intl@service.alibaba.com>
+Date: Wed, 14 Oct 2026 19:23:36 +0000
+Subject: [PATCH 3/3] Fix: news post no longer repeats the headline twice
+
+- extract_news_text now returns only the article body (no title prepended)
+- if RSS description duplicates the title, the duplicate is dropped
+- fetch_rss_feeds falls back to content/content:encoded when summary==title
+- post builder in main.py guards against LLM returning summary == title
+- get_formatted_post includes the short summary when available
+---
+ main.py         | 36 ++++++++++++++-----
+ news_checker.py | 94 +++++++++++++++++++++++++++++++++++++++----------
+ 2 files changed, 103 insertions(+), 27 deletions(-)
+
+diff --git a/main.py b/main.py
+index b9effe4..4478703 100644
+--- a/main.py
++++ b/main.py
+@@ -77,15 +77,33 @@ async def post_news_to_group(news: dict):
+         [InlineKeyboardButton(text="🔗 Відкрити", url=news["link"])]
+     ])
+     
+-    # Генерація власного заголовка та переказу
+-    summary_result = generate_summary(news["title"], news.get("description", ""))
+-    
+-    post_text = (
+-        f"📰 {news['source']}\n\n"
+-        f"{summary_result['title']}\n\n"
+-        f"{summary_result['summary']}\n\n"
+-        f"🔗 {news['link']}"
+-    )
++    # Генерація власного заголовка та переказу.
++    # news["description"] — це вже ТІЛЬКО тіло новини без заголовка
++    # (дублікати "опис == заголовок" прибираються на етапі фільтрації).
++    title = news["title"]
++    description = (news.get("description") or "").strip()
++    summary_result = generate_summary(title, description)
++    
++    result_title = (summary_result.get("title") or title).strip()
++    result_summary = (summary_result.get("summary") or "").strip()
++    
++    # Захист від повторів: якщо LLM повернула переказ, що збігається
++    # із заголовком (або порожній) — не дублюємо той самий текст двічі.
++    def _norm(s: str) -> str:
++        return " ".join(s.split()).lower().rstrip(".!")
++    
++    if not result_summary or _norm(result_summary) == _norm(result_title):
++        result_summary = ""
++    
++    parts = [
++        f"📰 {news['source']}",
++        result_title,
++    ]
++    if result_summary:
++        parts.append(result_summary)
++    parts.append(f"🔗 {news['link']}")
++    
++    post_text = "\n\n".join(parts)
+     
+     await bot.send_message(
+         chat_id=CHAT_ID,
+diff --git a/news_checker.py b/news_checker.py
+index 9c8040d..d1d966e 100644
+--- a/news_checker.py
++++ b/news_checker.py
+@@ -109,14 +109,37 @@ class NewsChecker:
+ 
+                 for entry in feed.entries:
+ 
++                    # Деякі RSS-стрічки (особливо українських видань) кладуть
++                    # у description той самий текст, що й у title, або лише
++                    # коротке переказане речення. Тоді спробуємо дістати
++                    # повніший текст з content/content:encoded.
++                    raw_description = (
++                        getattr(entry, "summary", "")
++                        or getattr(entry, "description", "")
++                        or ""
++                    )
++
++                    title_text = getattr(entry, "title", "Без назви")
++
++                    if (
++                        not raw_description.strip()
++                        or raw_description.strip() == title_text.strip()
++                    ):
++                        content_parts = []
++                        for part in getattr(entry, "content", []) or []:
++                            value = getattr(part, "value", "")
++                            if value:
++                                content_parts.append(value)
++                        encoded = getattr(entry, "content_encoded", "")
++                        if encoded:
++                            content_parts.append(encoded)
++                        if content_parts:
++                            raw_description = "\n".join(content_parts)
++
+                     entry_data = {
+-                        "title": getattr(
+-                            entry,
+-                            "title",
+-                            "Без назви"
+-                        ),
++                        "title": title_text,
+ 
+-                        "description": getattr(entry, 'summary', '') or getattr(entry, 'description', ''),
++                        "description": raw_description,
+ 
+                         "link": getattr(
+                             entry,
+@@ -144,10 +167,20 @@ class NewsChecker:
+ 
+         return feeds
+ 
++    @staticmethod
++    def _normalize_ws(text: str) -> str:
++        """Приведення тексту до нормального вигляду (однакові порівняння)."""
++        return " ".join(text.split())
++
+     def extract_news_text(self, entry) -> str:
+-        """Витягування тексту з новини."""
++        """Витягування тексту з новини.
++
++        Повертає ТІЛЬКО тіло новини (опис), без заголовка — заголовок
++        додається окремо при формуванні поста. Раніше сюди вставлявся
++        і заголовок, а багато RSS-стрічок дублюють title у description,
++        через що в Telegram заголовок з'являвся двічі.
++        """
+ 
+-        title = entry.get("title", "")
+         description = entry.get("description", "") or ""
+ 
+         soup = BeautifulSoup(
+@@ -160,7 +193,15 @@ class NewsChecker:
+             strip=True
+         )
+ 
+-        return f"{title}\n\n{description}".strip()
++        title = entry.get("title", "")
++
++        # Якщо опис збігається із заголовком (типова риса коротких
++        # RSS-стрічок) — не дублюємо: тіло вважаємо порожнім, і пост
++        # буде складатися з заголовка + посилання, без повтору.
++        if self._normalize_ws(description) == self._normalize_ws(title):
++            description = ""
++
++        return description.strip()
+ 
+     def compute_news_embedding(self, news_text: str) -> List[float]:
+         """Обчислення embeddings для тексту новини."""
+@@ -235,13 +276,19 @@ class NewsChecker:
+ 
+             news_text = self.extract_news_text(entry)
+ 
+-            if not news_text.strip():
++            # Для семантичної фільтрації використовуємо заголовок + тіло,
++            # щоб не втрачати релевантність у стрічок із коротким описом.
++            embedding_text = "\n\n".join(
++                part for part in (entry.get("title", ""), news_text) if part
++            ).strip()
++
++            if not embedding_text:
+ 
+                 continue
+ 
+             news_embedding = (
+                 self.compute_news_embedding(
+-                    news_text
++                    embedding_text
+                 )
+             )
+ 
+@@ -322,7 +369,12 @@ class NewsChecker:
+         self,
+         news: Dict
+     ) -> str:
+-        """Формування тексту посту для Telegram."""
++        """Формування тексту посту для Telegram.
++
++        Формат: джерело → заголовок → короткий зміст (якщо є) → посилання.
++        Заголовок ніколи не повторюється: якщо опис збігався з ним,
++        extract_news_text вже прибрав дублікат.
++        """
+ 
+         title = news["title"]
+ 
+@@ -330,13 +382,19 @@ class NewsChecker:
+ 
+         source = news["source"]
+ 
+-        post_text = (
+-            f"📰 {source}\n\n"
+-            f"{title}\n\n"
+-            f"🔗 {link}"
+-        )
++        description = (news.get("description") or "").strip()
++
++        parts = [
++            f"📰 {source}",
++            title,
++        ]
++
++        if description:
++            parts.append(description)
++
++        parts.append(f"🔗 {link}")
+ 
+-        return post_text
++        return "\n\n".join(parts)
+ 
+     def get_stats(
+         self
+-- 
+2.39.5
+
