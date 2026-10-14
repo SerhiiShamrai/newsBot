@@ -2,6 +2,10 @@ import os
 from openai import OpenAI
 
 
+# Скільки символів опису максимум віддаємо моделі.
+MAX_DESCRIPTION_CHARS = 3000
+
+
 def generate_summary(title: str, description: str) -> dict:
     """
     Генерує власний заголовок та переказ новини через Groq API.
@@ -18,10 +22,15 @@ def generate_summary(title: str, description: str) -> dict:
         api_key=os.environ["GROQ_API_KEY"]
     )
 
+    # Дуже довгі тексти (повні статті з RSS) не передаємо в модель цілком:
+    # так менше шансів упертися в ліміти Groq, а для переказу вистачає початку.
+    description = (description or "")[:MAX_DESCRIPTION_CHARS]
+
     prompt = f"""Ось новина. Заголовок: {title}. Опис: {description}.
 Твоє завдання:
 1. Придумай власний короткий заголовок (до 10 слів), що відображає суть новини
-2. Напиши короткий переказ українською мовою, 2-3 речення, тільки головна думка
+2. Напиши короткий переказ українською мовою, 2-3 речення, тільки головна думка.
+   Якщо опис порожній — нічого не вигадуй, залиш "summary" порожнім рядком.
 
 Дай відповідь СТРОГО у форматі JSON, без пояснень і без markdown-розмітки:
 {{"title": "...", "summary": "..."}}"""
@@ -48,15 +57,19 @@ def generate_summary(title: str, description: str) -> dict:
         import json
         result = json.loads(content)
 
+        new_title = result.get("title")
+        new_summary = result.get("summary")
+
         return {
-            "title": result.get("title", title),
-            "summary": result.get("summary", description)
+            "title": new_title if isinstance(new_title, str) and new_title.strip() else title,
+            "summary": new_summary if isinstance(new_summary, str) else ""
         }
 
     except Exception as e:
         print(f"⚠️ Помилка при генерації summary: {e}")
-        # Fallback: повертаємо оригінальні дані
+        # Fallback: оригінальний заголовок і БЕЗ переказу. Сирий опис (який
+        # може бути повною статтею на тисячі символів) у пост не підставляємо.
         return {
             "title": title,
-            "summary": description
+            "summary": ""
         }

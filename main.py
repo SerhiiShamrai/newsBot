@@ -12,6 +12,11 @@ from news_checker import NewsChecker
 from summarizer import generate_summary
 
 
+# Ліміти довжини посту (Telegram приймає не більше 4096 символів у повідомленні)
+MAX_SUMMARY_CHARS = 700
+MAX_POST_CHARS = 4000
+
+
 # Отримання токену та ID групи з середовища
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -94,17 +99,29 @@ async def post_news_to_group(news: dict):
     
     if not result_summary or _norm(result_summary) == _norm(result_title):
         result_summary = ""
-    
-    parts = [
-        f"📰 {news['source']}",
-        result_title,
-    ]
-    if result_summary:
-        parts.append(result_summary)
-    parts.append(f"🔗 {news['link']}")
-    
-    post_text = "\n\n".join(parts)
-    
+
+    # Захист від надто довгого переказу: короткий переказ — це 2-3 речення.
+    # Якщо вийшло значно більше — краще нічого не писати, ніж злити в групу
+    # півстатті (і впертися в ліміт Telegram у 4096 символів).
+    if len(result_summary) > MAX_SUMMARY_CHARS:
+        result_summary = ""
+
+    def _build_post(summary: str) -> str:
+        parts = [
+            f"📰 {news['source']}",
+            result_title,
+        ]
+        if summary:
+            parts.append(summary)
+        parts.append(f"🔗 {news['link']}")
+        return "\n\n".join(parts)
+
+    post_text = _build_post(result_summary)
+
+    # Остання страховка: пост завжди має влізти в ліміт Telegram.
+    if len(post_text) > MAX_POST_CHARS:
+        post_text = _build_post("")
+
     await bot.send_message(
         chat_id=CHAT_ID,
         text=post_text,
