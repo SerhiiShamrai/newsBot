@@ -109,14 +109,37 @@ class NewsChecker:
 
                 for entry in feed.entries:
 
-                    entry_data = {
-                        "title": getattr(
-                            entry,
-                            "title",
-                            "Без назви"
-                        ),
+                    # Деякі RSS-стрічки (особливо українських видань) кладуть
+                    # у description той самий текст, що й у title, або лише
+                    # коротке переказане речення. Тоді спробуємо дістати
+                    # повніший текст з content/content:encoded.
+                    raw_description = (
+                        getattr(entry, "summary", "")
+                        or getattr(entry, "description", "")
+                        or ""
+                    )
 
-                        "description": getattr(entry, 'summary', '') or getattr(entry, 'description', ''),
+                    title_text = getattr(entry, "title", "Без назви")
+
+                    if (
+                        not raw_description.strip()
+                        or raw_description.strip() == title_text.strip()
+                    ):
+                        content_parts = []
+                        for part in getattr(entry, "content", []) or []:
+                            value = getattr(part, "value", "")
+                            if value:
+                                content_parts.append(value)
+                        encoded = getattr(entry, "content_encoded", "")
+                        if encoded:
+                            content_parts.append(encoded)
+                        if content_parts:
+                            raw_description = "\n".join(content_parts)
+
+                    entry_data = {
+                        "title": title_text,
+
+                        "description": raw_description,
 
                         "link": getattr(
                             entry,
@@ -144,10 +167,20 @@ class NewsChecker:
 
         return feeds
 
-    def extract_news_text(self, entry) -> str:
-        """Витягування тексту з новини."""
+    @staticmethod
+    def _normalize_ws(text: str) -> str:
+        """Приведення тексту до нормального вигляду (однакові порівняння)."""
+        return " ".join(text.split())
 
-        title = entry.get("title", "")
+    def extract_news_text(self, entry) -> str:
+        """Витягування тексту з новини.
+
+        Повертає ТІЛЬКО тіло новини (опис), без заголовка — заголовок
+        додається окремо при формуванні поста. Раніше сюди вставлявся
+        і заголовок, а багато RSS-стрічок дублюють title у description,
+        через що в Telegram заголовок з'являвся двічі.
+        """
+
         description = entry.get("description", "") or ""
 
         soup = BeautifulSoup(
@@ -160,7 +193,15 @@ class NewsChecker:
             strip=True
         )
 
-        return f"{title}\n\n{description}".strip()
+        title = entry.get("title", "")
+
+        # Якщо опис збігається із заголовком (типова риса коротких
+        # RSS-стрічок) — не дублюємо: тіло вважаємо порожнім, і пост
+        # буде складатися з заголовка + посилання, без повтору.
+        if self._normalize_ws(description) == self._normalize_ws(title):
+            description = ""
+
+        return description.strip()
 
     def compute_news_embedding(self, news_text: str) -> List[float]:
         """Обчислення embeddings для тексту новини."""
@@ -235,13 +276,19 @@ class NewsChecker:
 
             news_text = self.extract_news_text(entry)
 
-            if not news_text.strip():
+            # Для семантичної фільтрації використовуємо заголовок + тіло,
+            # щоб не втрачати релевантність у стрічок із коротким описом.
+            embedding_text = "\n\n".join(
+                part for part in (entry.get("title", ""), news_text) if part
+            ).strip()
+
+            if not embedding_text:
 
                 continue
 
             news_embedding = (
                 self.compute_news_embedding(
-                    news_text
+                    embedding_text
                 )
             )
 
@@ -322,7 +369,12 @@ class NewsChecker:
         self,
         news: Dict
     ) -> str:
-        """Формування тексту посту для Telegram."""
+        """Формування тексту посту для Telegram.
+
+        Формат: джерело → заголовок → короткий зміст (якщо є) → посилання.
+        Заголовок ніколи не повторюється: якщо опис збігався з ним,
+        extract_news_text вже прибрав дублікат.
+        """
 
         title = news["title"]
 
@@ -330,13 +382,19 @@ class NewsChecker:
 
         source = news["source"]
 
-        post_text = (
-            f"📰 {source}\n\n"
-            f"{title}\n\n"
-            f"🔗 {link}"
-        )
+        description = (news.get("description") or "").strip()
 
-        return post_text
+        parts = [
+            f"📰 {source}",
+            title,
+        ]
+
+        if description:
+            parts.append(description)
+
+        parts.append(f"🔗 {link}")
+
+        return "\n\n".join(parts)
 
     def get_stats(
         self
