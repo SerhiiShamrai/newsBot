@@ -44,13 +44,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Перевірка, чи є зміни в quotes_state.json
+          # Спочатку git add, потім перевірка staged-змін (--cached):
+          # так нові (ще не відстежувані) файли теж потрапляють у коміт.
           if [ -f quotes_state.json ]; then
-            if git diff --quiet quotes_state.json; then
-              echo "ℹ️ quotes_state.json не змінився або ще не існує."
+            git add quotes_state.json
+            if git diff --cached --quiet; then
+              echo "ℹ️ quotes_state.json не змінився."
             else
-              git add quotes_state.json
-              git commit -m "Update: quote of the day state" -a || echo "No changes to commit"
+              git commit -m "Update: quote of the day state"
               git push
               echo "✅ Стан цитати оновлено в репозиторії"
             fi
