@@ -11,7 +11,7 @@ from datetime import date, timedelta
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from isw_report import build_isw_url, fetch_isw_report, translate_and_summarize_isw
+from isw_report import fetch_isw_report_for_date, translate_and_summarize_isw
 
 
 def format_date_ukrainian(target_date: date) -> str:
@@ -151,15 +151,16 @@ async def main():
 
     print(f"📅 Отримання звіту ISW за {yesterday}...")
 
-    url = build_isw_url(yesterday)
+    found = fetch_isw_report_for_date(yesterday)
+
+    if not found:
+        # Раніше тут був тихий вихід з кодом 0 — workflow лишався зеленим,
+        # а публікації тижнями не було. Тепер запуск падає, і це видно.
+        print(f"❌ Звіт ISW за {yesterday} не знайдено в жодному з джерел")
+        sys.exit(1)
+
+    text, url = found
     print(f"URL: {url}")
-
-    text = fetch_isw_report(url)
-
-    if not text:
-        print("⚠️ Звіт не знайдено, завершуємо роботу без помилки")
-        return
-
     print(f"📝 Отримано текст звіту ({len(text)} символів)")
 
     result = translate_and_summarize_isw(text)
