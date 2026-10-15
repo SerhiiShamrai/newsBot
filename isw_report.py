@@ -5,6 +5,7 @@
 import os
 from datetime import date, datetime
 from typing import Optional
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -43,6 +44,84 @@ def build_isw_url(target_date: date) -> str:
     )
 
 
+REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+}
+
+# Щоденні звіти "Russian Offensive Campaign Assessment" ISW тепер виходять
+# на criticalthreats.org (на understandingwar.org бот їх більше не знаходив —
+# саме тому публікації ISW припинилися). Лишаємо обидва джерела:
+# спершу пробуємо кожну адресу напряму, потім шукаємо у списку публікацій.
+CRITICAL_THREATS_LISTING_URL = "https://www.criticalthreats.org/analysis"
+
+# Мінімальна довжина тексту, щоб вважати сторінку справжнім звітом, а не
+# порожньою оболонкою чи сторінкою з меню/футером (повний звіт — десятки тисяч символів).
+MIN_REPORT_CHARS = 3000
+
+
+def _report_slug(target_date: date) -> str:
+    """Slug звіту за датою, напр. russian-offensive-campaign-assessment-october-14-2026."""
+    month_name = target_date.strftime("%B").lower()
+    return (
+        f"russian-offensive-campaign-assessment-"
+        f"{month_name}-{target_date.day}-{target_date.year}"
+    )
+
+
+def build_candidate_urls(target_date: date) -> list[str]:
+    """
+    Усі відомі адреси звіту за датою, у порядку спроб.
+
+    Перший — criticalthreats.org (там звіти зараз з'являються), далі той самий
+    без "www" та старий формат understandingwar.org.
+    """
+    slug = _report_slug(target_date)
+    return [
+        f"https://www.criticalthreats.org/analysis/{slug}",
+        f"https://criticalthreats.org/analysis/{slug}",
+        build_isw_url(target_date),
+    ]
+
+
+def _extract_report_text(html: str) -> Optional[str]:
+    """
+    Дістає текст звіту з HTML сторінки.
+
+    Відкидає навігацію/футер і незаповнені шаблонні плейсхолдери ({{...}}),
+    якими сторінка criticalthreats.org наповнена поза основним текстом.
+    Повертає None, якщо тексту замало, щоб бути справжнім звітом.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript"]):
+        tag.decompose()
+
+    article_content = soup.find("article")
+    if not article_content:
+        article_content = soup.find("div", class_=["entry-content", "post-content"])
+    if not article_content:
+        article_content = soup.find("main")
+    if not article_content:
+        article_content = soup.body
+    if not article_content:
+        return None
+
+    lines = []
+    for elem in article_content.find_all(["p", "h2", "h3", "h4"]):
+        text = elem.get_text(" ", strip=True)
+        if text and "{{" not in text:
+            lines.append(text)
+
+    result = "\n\n".join(lines)
+    if len(result) < MIN_REPORT_CHARS:
+        return None
+    return result
+
+
 def fetch_isw_report(url: str) -> Optional[str]:
     """
     Отримує текст звіту ISW за вказаним URL.
@@ -53,39 +132,16 @@ def fetch_isw_report(url: str) -> Optional[str]:
     Returns:
         Текст звіту як рядок, або None якщо звіт не знайдено
     """
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        )
-    }
     try:
-        response = requests.get(url, headers=headers, timeout=30)
+        response = requests.get(url, headers=REQUEST_HEADERS, timeout=30)
         if response.status_code != 200:
             print(f"⚠️ Звіт не знайдено (статус {response.status_code}): {url}")
             return None
 
-        soup = BeautifulSoup(response.text, "html.parser")
-        article_content = soup.find("article")
-        if not article_content:
-            article_content = soup.find("div", class_=["entry-content", "post-content"])
-        if not article_content:
-            main = soup.find("main")
-            if main:
-                article_content = main
-        if not article_content:
-            print(f"⚠️ Не вдалося знайти контент статті: {url}")
-            return None
-
-        text_elements = article_content.find_all(["p", "h2", "h3", "h4"])
-        lines = []
-        for elem in text_elements:
-            text = elem.get_text(" ", strip=True)
-            if text:
-                lines.append(text)
-
-        return "\n\n".join(lines)
+        text = _extract_report_text(response.text)
+        if text is None:
+            print(f"⚠️ Не вдалося знайти текст звіту (замало контенту): {url}")
+        return text
 
     except requests.RequestException as e:
         print(f"⚠️ Помилка при завантаженні звіту ISW: {e}")
@@ -93,6 +149,58 @@ def fetch_isw_report(url: str) -> Optional[str]:
     except Exception as e:
         print(f"⚠️ Помилка при обробці звіту ISW: {e}")
         return None
+
+
+def _find_url_in_listing(target_date: date) -> Optional[str]:
+    """
+    Шукає адресу звіту у списку публікацій criticalthreats.org.
+
+    Деякі звіти мають у slug додатковий хеш (напр. ...-october-2-2026-6ac053ceab44c),
+    тому пряма адреса за датою їх не знаходить.
+    """
+    slug = _report_slug(target_date)
+    try:
+        response = requests.get(
+            CRITICAL_THREATS_LISTING_URL, headers=REQUEST_HEADERS, timeout=30
+        )
+        if response.status_code != 200:
+            print(f"⚠️ Список публікацій недоступний (статус {response.status_code})")
+            return None
+        soup = BeautifulSoup(response.text, "html.parser")
+        for link in soup.find_all("a", href=True):
+            if slug in link["href"]:
+                return urljoin(CRITICAL_THREATS_LISTING_URL, link["href"])
+    except requests.RequestException as e:
+        print(f"⚠️ Помилка при завантаженні списку публікацій: {e}")
+    except Exception as e:
+        print(f"⚠️ Помилка при пошуку звіту у списку публікацій: {e}")
+    return None
+
+
+def fetch_isw_report_for_date(target_date: date) -> Optional[tuple[str, str]]:
+    """
+    Знаходить і завантажує звіт ISW за датою, пробуючи всі відомі джерела.
+
+    Returns:
+        (текст звіту, URL, з якого його взято) або None, якщо жодне джерело
+        не віддало справжній звіт.
+    """
+    candidates = build_candidate_urls(target_date)
+
+    for url in candidates:
+        print(f"🔎 Пробую: {url}")
+        text = fetch_isw_report(url)
+        if text:
+            return text, url
+
+    listed_url = _find_url_in_listing(target_date)
+    if listed_url and listed_url not in candidates:
+        print(f"🔎 Знайдено у списку публікацій: {listed_url}")
+        text = fetch_isw_report(listed_url)
+        if text:
+            return text, listed_url
+
+    return None
 
 
 def translate_and_summarize_isw(text: str) -> dict:
