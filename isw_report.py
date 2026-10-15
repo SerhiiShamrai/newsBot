@@ -4,13 +4,19 @@
 
 import json
 import os
+import time
 from datetime import date, datetime
 from typing import Optional
 from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
-from openai import OpenAI
+from openai import (
+    APIConnectionError,
+    InternalServerError,
+    OpenAI,
+    RateLimitError,
+)
 
 # Модель Groq для перекладу/переказу.
 # llama-3.3-70b-versatile деактивована Groq 16.08.2026 — саме через це
@@ -284,53 +290,173 @@ def fetch_isw_report_for_date(target_date: date) -> Optional[tuple[str, str]]:
     return None
 
 
+# --- Переказ звіту ---------------------------------------------------------
+
+# Повний звіт ISW — десятки тисяч символів. Раніше бот віддавав моделі лише
+# перші 10 000, тому переказ охоплював тільки початок. Тепер довгий звіт
+# ділиться на частини: з кожної модель виписує ключові факти, а потім із
+# цієї добірки робиться один зв'язний переказ усього звіту.
+SINGLE_PASS_CHARS = 14000   # до цього розміру звіт іде в модель одним запитом
+CHUNK_CHARS = 9000          # розмір однієї частини для довгого звіту
+MAX_CHUNKS = 7              # запобіжник: не більше стількох частин
+CHUNK_PAUSE_SEC = float(os.environ.get("ISW_CHUNK_PAUSE_SEC", "6"))  # пауза проти лімітів Groq
+
+# Telegram приймає до 4096 символів разом із заголовком і посиланням.
+SUMMARY_TARGET_CHARS = 2800  # на скільки символів просимо переказ
+SUMMARY_HARD_CHARS = 3600    # довше за це — просимо модель скоротити
+
+SKIP_MARKER = "ПРОПУСТИТИ"
+
+
+def _split_into_chunks(text: str, size: int) -> list[str]:
+    """Ділить текст на частини до `size` символів по межах абзаців."""
+    chunks: list[str] = []
+    current = ""
+    for paragraph in text.split("\n\n"):
+        # Надто довгий абзац ріжемо жорстко, щоб він не розпирав частину.
+        while len(paragraph) > size:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(paragraph[:size])
+            paragraph = paragraph[size:]
+        if current and len(current) + len(paragraph) + 2 > size:
+            chunks.append(current)
+            current = ""
+        current = f"{current}\n\n{paragraph}" if current else paragraph
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _call_llm(client: OpenAI, prompt: str, max_tokens: int, temperature: float = 0.3) -> tuple[str, str]:
+    """
+    Один запит до моделі з повторами при лімітах/збоях мережі.
+
+    Returns:
+        (текст відповіді, finish_reason). finish_reason == "length" означає,
+        що модель обірвалась на ліміті токенів і текст неповний.
+    """
+    attempts = 4
+    for attempt in range(1, attempts + 1):
+        try:
+            response = client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            choice = response.choices[0]
+            return (choice.message.content or "").strip(), choice.finish_reason or ""
+        except (RateLimitError, APIConnectionError, InternalServerError) as e:
+            if attempt == attempts:
+                raise
+            wait = 15 * attempt
+            print(f"⏳ {type(e).__name__}, повтор через {wait} с (спроба {attempt}/{attempts})")
+            time.sleep(wait)
+    return "", ""
+
+
+def _chunk_prompt(chunk: str, index: int, total: int) -> str:
+    return (
+        f"Це частина {index} з {total} щоденного аналітичного звіту про війну Росії "
+        "проти України (англійською). Випиши українською ключові факти саме з цього "
+        "фрагмента: 5-8 коротких пунктів, кожен — одне речення. Що і де відбулося, "
+        "хто що заявив, які оцінки дали аналітики, що важливого про озброєння чи тактику. "
+        "Використовуй ТІЛЬКИ факти з тексту, нічого не вигадуй. "
+        f"Якщо фрагмент складається лише з посилань, приміток чи службового тексту — "
+        f"відповідай одним словом: {SKIP_MARKER}."
+        f"\n\n{chunk}"
+    )
+
+
+def _final_prompt(material: str, from_facts: bool) -> str:
+    source = (
+        "добірка ключових фактів, виписаних з усіх частин звіту"
+        if from_facts
+        else "текст звіту"
+    )
+    return (
+        "Нижче — " + source + " щоденного аналітичного звіту ISW про війну Росії проти України. "
+        "Зроби з нього змістовний стислий переказ українською мовою, як для ранкової новинної добірки.\n\n"
+        "Вимоги:\n"
+        f"- Загальний обсяг — не більше {SUMMARY_TARGET_CHARS} символів.\n"
+        "- Почни з 1-2 речень про головне за добу, далі — ключові події по напрямках фронту, "
+        "важливі заяви, оцінки аналітиків, деталі про озброєння чи тактику.\n"
+        "- Відбирай найважливіше, а не переказуй усе підряд; другорядне пропускай.\n"
+        "- Закінчуй повним реченням.\n"
+        "- Використовуй ТІЛЬКИ факти з тексту; не додавай дат, цифр чи подій, яких там немає.\n"
+        "- Пиши суцільним текстом без markdown-розмітки (без зірочок, решіток, списків з дефісами).\n\n"
+        f"{material}"
+    )
+
+
+def _shorten_prompt(summary: str) -> str:
+    return (
+        f"Скороти цей переказ до {SUMMARY_TARGET_CHARS} символів. Збережи найважливіші факти, "
+        "нічого не додавай, закінчи повним реченням. Без markdown-розмітки.\n\n"
+        f"{summary}"
+    )
+
+
 def translate_and_summarize_isw(text: str) -> dict:
     """
-    Перекладає звіт ISW українською мовою через Groq API.
+    Робить стислий переказ звіту ISW українською мовою через Groq API.
+
+    Короткий звіт іде в модель одним запитом. Довгий ділиться на частини:
+    з кожної виписуються ключові факти, а з них пишеться підсумковий переказ.
+    Якщо відповідь вийшла надто довгою або обірвалась, модель просять скоротити,
+    а не різати текст механічно.
 
     Args:
         text: Текст звіту англійською мовою
 
     Returns:
-        Словник {"summary": "переклад"} або fallback при помилці
+        Словник {"summary": "переказ"} або fallback при помилці
     """
     client = OpenAI(
         base_url="https://api.groq.com/openai/v1",
-        api_key=os.environ["GROQ_API_KEY"]
+        api_key=os.environ["GROQ_API_KEY"],
+        max_retries=3,
     )
 
-    truncated_text = text[:10000] if len(text) > 10000 else text
-
-    # Вивід перших 500 символів у лог для перевірки контенту перед відправкою в Groq
-    print(f"📄 Перші 500 символів тексту для ISW: {truncated_text[:500]}")
-
-    prompt = (
-        "Ось звіт англійською мовою про останні події війни Росії проти України. "
-        "Зроби стислий переказ українською мовою, приблизно 10-12 речень, "
-        "охопи всі ключові тези: ситуацію на фронті по напрямках, ключові заяви й події, "
-        "оцінки аналітиків, важливі деталі про озброєння чи тактику, якщо згадуються. "
-        "\n\nВАЖЛИВО: Використовуй ТІЛЬКИ факти з наданого тексту нижче. "
-        "НЕ додавай жодної інформації, дат чи цифр, яких немає в оригінальному тексті. "
-        "Якщо якась деталь незрозуміла — краще пропусти її, ніж вигадуй."
-        f"\n\n{truncated_text}"
-    )
+    print(f"📄 Перші 500 символів тексту для ISW: {text[:500]}")
 
     try:
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.5,
-            max_tokens=1500
-        )
-        summary = response.choices[0].message.content.strip()
+        if len(text) <= SINGLE_PASS_CHARS:
+            material, from_facts = text, False
+        else:
+            chunks = _split_into_chunks(text, CHUNK_CHARS)[:MAX_CHUNKS]
+            print(f"🧩 Звіт довгий ({len(text)} символів), ділю на {len(chunks)} частин")
+            partials: list[str] = []
+            for i, chunk in enumerate(chunks, 1):
+                if i > 1:
+                    time.sleep(CHUNK_PAUSE_SEC)
+                part, _ = _call_llm(client, _chunk_prompt(chunk, i, len(chunks)), 2000)
+                if part and part.strip(" .!\n").upper() != SKIP_MARKER:
+                    partials.append(part)
+            if not partials:
+                raise ValueError("жодна частина звіту не дала фактів")
+            material, from_facts = "\n\n".join(partials), True
+            time.sleep(CHUNK_PAUSE_SEC)
+
+        summary, finish = _call_llm(client, _final_prompt(material, from_facts), 3000)
+        if not summary:
+            raise ValueError("модель повернула порожню відповідь")
+
+        if finish == "length" or len(summary) > SUMMARY_HARD_CHARS:
+            print(f"✂️ Переказ завеликий або обірваний ({len(summary)} символів), прошу скоротити")
+            time.sleep(CHUNK_PAUSE_SEC)
+            shorter, finish2 = _call_llm(client, _shorten_prompt(summary), 3000)
+            if shorter and finish2 != "length":
+                summary = shorter
+
+        print(f"📝 Переказ готовий ({len(summary)} символів)")
         return {"summary": summary}
 
     except Exception as e:
-        # Лог тепер показує назву моделі й тип помилки — це прискорить
-        # діагностику наступного разу (модель знову деактивують,
-        # ключ протермінується, ліміт вичерпається тощо).
+        # Лог показує назву моделі й тип помилки — це прискорить діагностику
+        # наступного разу (модель деактивують, ключ протермінується, ліміт вичерпається).
         print(
             f"⚠️ Помилка при перекладі ISW звіту (модель {GROQ_MODEL}): "
             f"{type(e).__name__}: {e}"
